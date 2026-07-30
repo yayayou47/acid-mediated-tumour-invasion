@@ -38,6 +38,9 @@ from matplotlib.patches import Rectangle
 
 from params import AGGRESSIVE, INDOLENT, MODERATE, PHENOTYPES
 
+# Embed TrueType rather than Type 3 fonts: Type 3 is rejected by most
+# publisher production pipelines and makes the text non-extractable.
+plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42})
 plt.rcParams.update({"font.size": 10, "figure.dpi": 150})
 
 # ─── Bulk parameters shared by all phenotypes (Table 2) ──────────────
