@@ -71,7 +71,9 @@ MIT. A `LICENSE` file is included in the public repository.
 
 ## Repository
 
-*[GitHub URL and Zenodo DOI to be inserted before resubmission.]*
+<https://github.com/yayayou47/acid-mediated-tumour-invasion>
+
+*[Zenodo DOI to be inserted before resubmission.]*
 
 ## Contact
 
