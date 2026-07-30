@@ -39,6 +39,9 @@ from params import (
     DT_DEFAULT, T_FINAL_DEFAULT, SEED,
 )
 
+# Embed TrueType rather than Type 3 fonts: Type 3 is rejected by most
+# publisher production pipelines and makes the text non-extractable.
+plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42})
 plt.rcParams.update({"font.size": 13, "axes.titlesize": 13,
                      "axes.labelsize": 13, "figure.dpi": 150})
 
@@ -388,13 +391,8 @@ def fig_regimes_overlay():
         ax.set_yticks([0, 1, 2])
     axes[0].set_ylabel(r"$y$ (nondim.)")
 
-    fig.suptitle(
-        rf"Three regimes simultaneously simulated on $\Omega = [0,2]^2$"
-        rf" at $t = {snap_time:.0f}$.  "
-        r"\textbf{Orange}: $\{T = T_{\max}/2\}$ (tumor front);  "
-        r"\textbf{White}: $\{N = 0.5\}$;  "
-        r"\textbf{Cyan dashed}: $\{H = \gamma/(2\omega)\}$.",
-        fontsize=11, fontweight="bold", y=1.06)
+    # No figure-level title: matplotlib's mathtext does not know \textbf,
+    # and the same information is carried by the caption in the manuscript.
     fig.savefig("regimes_overlay.pdf", dpi=200, bbox_inches="tight")
     plt.close(fig)
     print("  -> regimes_overlay.pdf\n")
