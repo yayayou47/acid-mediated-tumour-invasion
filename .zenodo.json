@@ -1,0 +1,34 @@
+{
+  "title": "Code and figures for \"Well-posedness, Stability, and Bifurcation in an Acid-Mediated Tumour Invasion Model with Interspecific Competition\"",
+  "description": "<p>Solver, symbolic verifications and figure generators for a three-component reaction&ndash;diffusion model of acid-mediated tumour invasion with interspecific competition. Includes the IMEX solver with a ghost-node Neumann Laplacian, the bifurcation and stability analysis, the bisection campaign for the critical seed radius with its cached results, the Fisher&ndash;KPP front-speed measurement, and the nine figures of the manuscript as submitted.</p><p>Accompanies manuscript BMAB-D-26-00386, submitted to <em>Bulletin of Mathematical Biology</em>.</p>",
+  "license": "MIT",
+  "upload_type": "software",
+  "access_right": "open",
+  "language": "eng",
+  "creators": [
+    {
+      "name": "Yaya, Yaya Youssouf",
+      "orcid": "0000-0003-0781-4923",
+      "affiliation": "Ecole Normale Superieure de N'Djamena, Chad; Universite Assane Seck de Ziguinchor, Senegal"
+    },
+    {
+      "name": "Mahamat, Barka Ibrahim",
+      "affiliation": "Ecole Normale Superieure de N'Djamena, Chad; Universite Gaston Berger de Saint-Louis, Senegal"
+    }
+  ],
+  "keywords": [
+    "mathematical oncology",
+    "acid-mediated invasion",
+    "reaction-diffusion",
+    "bifurcation analysis",
+    "Fisher-KPP",
+    "reproducibility"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/yayayou47/acid-mediated-tumour-invasion",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

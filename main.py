@@ -155,16 +155,41 @@ class Grid2D:
         self.extent = [0, Lx, 0, Ly]
 
 
+# Set by `boundary_order_control()` to build the WRONG boundary rows on
+# purpose, the ones appropriate to a cell-centred grid.  The manuscript
+# claims that this alone pulls the observed spatial order down to one, and
+# the claim is worth a run rather than an assertion.
+BOUNDARY_HALVED = False
+
+
+def _tridiagonal_neumann(n: int, h: float):
+    """One-dimensional Neumann Laplacian on a vertex-centred grid, second order.
+
+    The nodes sit ON the boundary (x_0 = 0, x_{n-1} = L), so the homogeneous
+    Neumann condition is imposed by reflection: the ghost value u_{-1} equals
+    u_1, and the first row of the operator is 2(u_1 - u_0)/h^2.  Writing
+    (u_1 - u_0)/h^2 instead -- half of that -- is a common slip and it costs
+    the whole boundary layer: the truncation error there is then O(1) rather
+    than O(h^2), which degrades the solution to first order overall and breaks
+    the discrete divergence theorem.  With the reflection below, the weighted
+    sum sum_i w_i (A u)_i vanishes to round-off for the trapezoidal weights
+    w = (1/2, 1, ..., 1, 1/2), so the scheme conserves exactly what the
+    continuous problem conserves.
+    """
+    main_diag = -2.0 * np.ones(n)
+    upper = np.ones(n - 1)
+    lower = np.ones(n - 1)
+    factor = 1.0 if BOUNDARY_HALVED else 2.0
+    upper[0] = factor         # row 0    : ghost node u_{-1} = u_1
+    lower[-1] = factor        # row n-1  : ghost node u_n   = u_{n-2}
+    return diags([lower, main_diag, upper], [-1, 0, 1], shape=(n, n)) / h**2
+
+
 def build_laplacian(grid):
     """Discrete 2D Laplacian with homogeneous Neumann boundary conditions."""
-    Nx, Ny, dx, dy = grid.Nx, grid.Ny, grid.dx, grid.dy
-    mx = -2.0 * np.ones(Nx); mx[0] = mx[-1] = -1.0
-    Ax = diags([np.ones(Nx-1), mx, np.ones(Nx-1)], [-1, 0, 1],
-               shape=(Nx, Nx)) / dx**2
-    my = -2.0 * np.ones(Ny); my[0] = my[-1] = -1.0
-    Ay = diags([np.ones(Ny-1), my, np.ones(Ny-1)], [-1, 0, 1],
-               shape=(Ny, Ny)) / dy**2
-    return csc_matrix(kron(identity(Ny), Ax) + kron(Ay, identity(Nx)))
+    Ax = _tridiagonal_neumann(grid.Nx, grid.dx)
+    Ay = _tridiagonal_neumann(grid.Ny, grid.dy)
+    return csc_matrix(kron(identity(grid.Ny), Ax) + kron(Ay, identity(grid.Nx)))
 
 
 class Solver:
@@ -246,27 +271,38 @@ class Solver:
         N, T, H = N0.copy(), T0.copy(), H0.copy()
         p = self.params
         dx, dy = self.grid.dx, self.grid.dy
-        eps = 1e-12
         e3 = p.E3
         tt, vL = [], []
+        n_skipped = 0
         for n in range(Nt + 1):
             if n % sample_every == 0:
-                if e3 is not None:
+                # No flooring of N or T.  The Volterra functional carries
+                # -N* log N and is genuinely infinite where a component
+                # vanishes, which is why the theory places it on the
+                # absorbing set and not on all of R; clipping at some eps
+                # would print a finite number that depends on eps rather
+                # than on the solution.  A sample with a vanishing
+                # component is skipped and counted.
+                if min(float(N.min()), float(T.min())) <= 0.0:
+                    n_skipped += 1
+                elif e3 is not None:
                     Ns, Ts, Hs = e3
-                    Nn = np.maximum(N, eps); Tn = np.maximum(T, eps)
-                    LN = np.sum(Nn - Ns - Ns * np.log(Nn / Ns)) * dx * dy
-                    LT = np.sum(Tn - Ts - Ts * np.log(Tn / Ts)) * dx * dy
+                    LN = np.sum(N - Ns - Ns * np.log(N / Ns)) * dx * dy
+                    LT = np.sum(T - Ts - Ts * np.log(T / Ts)) * dx * dy
                     LH = 0.5 * np.sum((H - Hs)**2) * dx * dy
+                    tt.append(n * self.dt); vL.append(LN + LT + LH)
                 else:
                     Hs = p.gamma / p.omega
-                    Tn = np.maximum(T, eps)
                     LN = 0.5 * np.sum(N**2) * dx * dy
-                    LT = np.sum(Tn - 1 - np.log(Tn)) * dx * dy
+                    LT = np.sum(T - 1 - np.log(T)) * dx * dy
                     LH = 0.5 * np.sum((H - Hs)**2) * dx * dy
-                tt.append(n * self.dt); vL.append(LN + LT + LH)
+                    tt.append(n * self.dt); vL.append(LN + LT + LH)
             if n == Nt:
                 break
             N, T, H = self.step(N, T, H)
+        if n_skipped:
+            print(f"    ({n_skipped} samples skipped: a component vanished, "
+                  "so the functional is infinite there)")
         return np.array(tt), np.array(vL)
 
 
@@ -301,6 +337,14 @@ class InitialCondition:
         return N0, T0, H0
 
     def tiny_seed(self, n_tumors=5, n_acid=6, scale=0.05):
+        """A twentieth of the tumour load of :meth:`random_foci`.
+
+        Kept for experiments on sub-threshold data.  It is deliberately NOT
+        used by the regime figures: running the indolent phenotype from a
+        seed twenty times smaller than the other two made its panel flat and
+        the three-way comparison meaningless, since the panel then showed a
+        run that started at the equilibrium it was supposed to converge to.
+        """
         N0_f, T0_f, H0_f = self.random_foci(n_tumors, n_acid)
         T0 = scale * T0_f
         H0 = 0.02 * H0_f
@@ -345,17 +389,21 @@ def fig_regimes_overlay():
 
     snap_time = 6.0
     scenarios = [
-        (INDOLENT,   N0_TINY, T0_TINY, H0_TINY, r"$E_1$ (suppression)"),
+        (INDOLENT,   N0_FULL, T0_FULL, H0_FULL, r"$E_1$ (suppression)"),
         (MODERATE,   N0_FULL, T0_FULL, H0_FULL, r"$E_3$ (coexistence)"),
         (AGGRESSIVE, N0_FULL, T0_FULL, H0_FULL, r"$E_2$ (invasion)"),
     ]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.8),
                              constrained_layout=True)
+    worst_viol = 0.0
     for ax, (pheno, N0, T0, H0, label) in zip(axes, scenarios):
         params = from_phenotype(pheno)
         solver = Solver(GRID, params, DT, enforce_clip=False)
         snaps = solver.run(N0, T0, H0, snap_time, [snap_time])
+        worst_viol = max(worst_viol,
+                         max(v for k, v in solver.violation_report().items()
+                             if k != "n_steps"))
         N, T, H = snaps[snap_time]
         H_iso = pheno.gamma / (2.0 * pheno.omega)
 
@@ -395,6 +443,7 @@ def fig_regimes_overlay():
     # and the same information is carried by the caption in the manuscript.
     fig.savefig("regimes_overlay.pdf", dpi=200, bbox_inches="tight")
     plt.close(fig)
+    print(f"  worst violation of R over the three panels: {worst_viol:.1e}")
     print("  -> regimes_overlay.pdf\n")
 
 
@@ -420,6 +469,7 @@ def fig_bifurcation():
     N0b, T0b, H0b = ic_b.random_foci(n_tumors=5, n_acid=6)
 
     N_final = []
+    worst_viol = 0.0
     for dv in delta_values:
         params = Parameters(alpha=p.alpha, beta=p.beta, gamma=p.gamma,
                             delta=dv, omega=p.omega,
@@ -427,6 +477,9 @@ def fig_bifurcation():
         solver = Solver(grid_b, params, dt=8e-3)
         snaps = solver.run(N0b, T0b, H0b, 18.0, [18.0])
         N_final.append(float(np.mean(snaps[18.0][0])))
+        worst_viol = max(worst_viol,
+                         max(v for k, v in solver.violation_report().items()
+                             if k != "n_steps"))
         print(f"  δ={dv:.2f}  ⟨N⟩={N_final[-1]:.3f}")
     delta_values = np.array(delta_values); N_final = np.array(N_final)
 
@@ -457,6 +510,7 @@ def fig_bifurcation():
     plt.tight_layout()
     plt.savefig("bifurcation_diagram.pdf", dpi=200, bbox_inches="tight")
     plt.close()
+    print(f"  worst violation of R over the sweep: {worst_viol:.1e}")
     print("  -> bifurcation_diagram.pdf\n")
 
 
@@ -712,6 +766,149 @@ def _run_means(solver, N0, T0, H0, T_final, sample_every=20):
             np.array(mT), np.array(mH))
 
 
+def _limit_state(params):
+    """The equilibrium Theorem 3.19 predicts, for a non-bistable regime."""
+    regime = params.regime
+    if regime == "coexistence":
+        return np.array(params.E3), r"$E_3$"
+    if regime == "invasion":
+        return np.array(params.E2), r"$E_2$"
+    if regime == "suppression":
+        return np.array([1.0, 0.0, 0.0]), r"$E_1$"
+    raise ValueError("bistable regime has no single limit")
+
+
+def _linear_rate(params, limit):
+    """Decay rate predicted by the linearisation at `limit`.
+
+    The slowest Neumann mode of the linearised problem is the constant one:
+    the diffusion matrix is diagonal with positive entries, so -mu D only
+    pushes eigenvalues further left.  The predicted rate is therefore the
+    spectral gap of the kinetic Jacobian at the limit.
+    """
+    Nl, Tl, Hl = limit
+    a, b, g, d, w = (params.alpha, params.beta, params.gamma,
+                     params.delta, params.omega)
+    J = np.array([[1 - 2 * Nl - d * Hl, 0.0, -d * Nl],
+                  [-a * b * Tl, b * (1 - 2 * Tl - a * Nl), 0.0],
+                  [0.0, g, -w]])
+    return -float(np.max(np.linalg.eigvals(J).real))
+
+
+def _fitted_rate(ts, errs, lo=1e-9, hi=1e-2):
+    """Exponential decay rate of `errs`, fitted where the decay is clean.
+
+    The window is chosen by magnitude rather than by time: below `lo` the
+    residual is at the level of round-off and flattens, which biases a fit
+    downwards, and above `hi` the solution is still in its transient.  What
+    is left is the interval on which the linearisation is supposed to
+    govern, and it is the only place a rate can be read.
+    """
+    ts, errs = np.asarray(ts), np.asarray(errs)
+    m = (errs > lo) & (errs < hi)
+    if m.sum() < 4:
+        return float("nan"), (float("nan"), float("nan"))
+    return (-float(np.polyfit(ts[m], np.log(errs[m]), 1)[0]),
+            (float(ts[m][0]), float(ts[m][-1])))
+
+
+def fig_sup_norm():
+    """Uniform-in-space convergence to the predicted equilibrium.
+
+    The macroscopic figure tracks spatial means, which can settle while the
+    solution is still far from its limit somewhere in the domain; a mean is
+    therefore not a test of Theorem 3.19, which asserts convergence in the
+    sup norm.  This figure measures the quantity the theorem is about.
+    """
+    print("=" * 60)
+    print("Figure: sup-norm convergence to the predicted equilibrium")
+    print("=" * 60)
+
+    scenarios = [(INDOLENT, r"$E_1$ regime"),
+                 (MODERATE, r"$E_3$ regime"),
+                 (AGGRESSIVE, r"$E_2$ regime")]
+    colours = ["#0072B2", "#009E73", "#D55E00"]
+    t_end = 60.0
+
+    fig, ax = plt.subplots(figsize=(7.0, 4.6), constrained_layout=True)
+    for (pheno, label), colour in zip(scenarios, colours):
+        params = from_phenotype(pheno)
+        limit, name = _limit_state(params)
+        solver = Solver(GRID, params, DT, enforce_clip=False)
+        N, T, H = N0_FULL.copy(), T0_FULL.copy(), H0_FULL.copy()
+        ts, errs = [], []
+        for n in range(int(t_end / DT) + 1):
+            if n % 40 == 0:
+                err = max(np.abs(N - limit[0]).max(),
+                          np.abs(T - limit[1]).max(),
+                          np.abs(H - limit[2]).max())
+                ts.append(n * DT)
+                errs.append(max(err, 1e-16))
+            if n == int(t_end / DT):
+                break
+            N, T, H = solver.step(N, T, H)
+        ax.semilogy(ts, errs, color=colour, lw=1.9,
+                    label=f"{label}, limit {name}")
+        # Measured decay rate against the linearisation, and the residual at
+        # the instant of the regime-overlay figure.  Both are quoted in the
+        # text, so both are computed here rather than asserted there.
+        rate, window = _fitted_rate(ts, errs)
+        pred = _linear_rate(params, limit)
+        at6 = errs[int(np.argmin(np.abs(np.asarray(ts) - 6.0)))]
+        viol = solver.violation_report()
+        worst = max(v for k, v in viol.items() if k != "n_steps")
+        print(f"  {label}: ||u - E||_inf = {errs[0]:.2e} at t=0, "
+              f"{errs[-1]:.2e} at t={t_end:g}; "
+              f"fitted rate on [{window[0]:.0f},{window[1]:.0f}] = "
+              f"{rate:.3f} vs linearisation {pred:.3f}; "
+              f"residual at t=6 = {at6:.3f}; worst violation {worst:.1e}")
+
+    ax.set_xlabel("$t$")
+    ax.set_ylabel(r"$\|u(\cdot,t) - E\|_{L^\infty(\Omega)}$")
+    ax.set_title("Uniform convergence in the three non-bistable regimes")
+    ax.grid(True, which="both", alpha=0.25)
+    ax.legend(frameon=False)
+    plt.savefig("sup_norm_convergence.pdf", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print("  -> sup_norm_convergence.pdf\n")
+
+
+def boundary_order_control(Nx_list=(51, 101, 201, 401)):
+    """Measure the spatial order with the halved boundary rows.
+
+    The scheme uses the ghost-node reflection, whose first row reads
+    2(u_1 - u_0)/h^2.  Writing (u_1 - u_0)/h^2 instead is the form
+    appropriate to a cell-centred grid and the natural slip on this one; the
+    manuscript states that it leaves an O(1) truncation error along the
+    boundary and pulls the observed order down to one.  This run measures
+    both variants on the same data, so the statement rests on numbers.
+    """
+    global BOUNDARY_HALVED
+    print("=" * 60)
+    print("Control: observed spatial order, ghost-node vs halved rows")
+    print("=" * 60)
+    p = from_phenotype(MODERATE)
+    dt, T_end = 2.5e-3, 4.0
+    for halved in (False, True):
+        BOUNDARY_HALVED = halved
+        fields = []
+        for Nx in Nx_list:
+            N, T, H, _ = _run_to_T(Nx, dt, T_end, p)
+            fields.append((Nx, N, T, H))
+        errs = []
+        for (Nc, Nn, Tc, Hc), (Nf, Nn2, Tf, Hf) in zip(fields[:-1], fields[1:]):
+            f = (Nf - 1) // (Nc - 1)
+            errs.append(max(np.abs(Nn - _coarsen(Nn2, f)).max(),
+                            np.abs(Tc - _coarsen(Tf, f)).max(),
+                            np.abs(Hc - _coarsen(Hf, f)).max()))
+        orders = [np.log2(errs[i] / errs[i + 1]) for i in range(len(errs) - 1)]
+        label = "halved rows (wrong)" if halved else "ghost node (used)"
+        print(f"  {label:22} errors " +
+              " ".join(f"{e:.2e}" for e in errs) +
+              "   orders " + " ".join(f"{o:.3f}" for o in orders))
+    BOUNDARY_HALVED = False
+
+
 def fig_macroscopic_evolution():
     """Time evolution of <N>(t), <T>(t), <H>(t) for the three
     phenotypes, with the predicted equilibrium values shown as
@@ -722,7 +919,7 @@ def fig_macroscopic_evolution():
     print("=" * 60)
 
     scenarios = [
-        (INDOLENT,   N0_TINY, T0_TINY, H0_TINY, r"$E_1$ regime"),
+        (INDOLENT,   N0_FULL, T0_FULL, H0_FULL, r"$E_1$ regime"),
         (MODERATE,   N0_FULL, T0_FULL, H0_FULL, r"$E_3$ regime"),
         (AGGRESSIVE, N0_FULL, T0_FULL, H0_FULL, r"$E_2$ regime"),
     ]
@@ -761,6 +958,28 @@ def fig_macroscopic_evolution():
                      rf"\ \delta = {pheno.delta:.1f}$)",
                      fontsize=11)
         ax.grid(True, alpha=0.3); ax.set_ylim(-0.05, 1.15)
+
+        # Numbers the text quotes about this figure: the time at which the
+        # means have settled, the decay rate of <N> where it decays, and the
+        # worst violation of the invariant region over the run.
+        tt_a, mN_a = np.asarray(tt), np.asarray(mN)
+        settled = [t for t, n_, t_ in zip(tt_a, mN_a, mT)
+                   if abs(n_ - eqN) < 0.01 and abs(t_ - eqT) < 0.01]
+        viol = solver.violation_report()
+        worst = max(v for k, v in viol.items() if k != "n_steps")
+        msg = (f"  {label}: <N> -> {mN[-1]:.4f} (predicted {eqN:.4f}), "
+               f"<T> -> {mT[-1]:.4f} (predicted {eqT:.4f}), "
+               f"worst violation {worst:.1e}")
+        if settled:
+            msg += f"; within 0.01 of the limit from t = {settled[0]:.1f}"
+        if eqN == 0.0:
+            m = (tt_a >= 15.0) & (tt_a <= 30.0) & (mN_a > 1e-12)
+            if m.sum() > 2:
+                rate = -float(np.polyfit(tt_a[m], np.log(mN_a[m]), 1)[0])
+                msg += (f"; decay rate of <N> on [15,30] = {rate:.3f} "
+                        f"(linearisation at E2: "
+                        f"{pheno.delta / pheno.delta_c - 1:.4f})")
+        print(msg)
     axes[0].set_ylabel(r"spatial average")
     axes[0].legend(loc="lower right", fontsize=9, framealpha=0.9)
     fig.suptitle(
@@ -790,6 +1009,7 @@ if __name__ == "__main__":
     # (much finer mesh, much longer run); run it separately.
     fig_2d_bifurcation()
     fig_macroscopic_evolution()
+    fig_sup_norm()
     print("=" * 70)
     print("All figures generated.")
     print("=" * 70)

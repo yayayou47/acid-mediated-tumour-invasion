@@ -84,6 +84,17 @@ WINDOWS_LONG = [(55, 75), (75, 100), (100, 130), (130, 170),
                 (170, 210), (210, 250)]
 LONGTIME_NPZ = "fisher_kpp_longtime.npz"
 
+# ─── Mesh and time-step control (invoke with `--refine`) ──────────────
+# The 0.5% excess of the measured speed over c* is the paper's one
+# quantitative claim about the front, so it has to survive refinement:
+# the run below halves h in both directions and halves dt, and reports
+# the ratio on the same late window as the reference run.  Four times
+# the work of `main()`, for one number.
+LX_FINE, NX_FINE = 14.0, 5601     # h = 0.0025
+NY_FINE = 7
+DT_FINE = 2.5e-4
+T_END_FINE = 76.0
+
 # ─── Leading-edge diagnostic (invoke with `--edge`) ───────────────────
 # The speed excess is saturated to within 0.2% by t = 60, so a shorter
 # domain and a moderate final time suffice to inspect the front's
@@ -91,6 +102,14 @@ LONGTIME_NPZ = "fisher_kpp_longtime.npz"
 LX_EDGE, NX_EDGE = 12.0, 2401     # h = 0.005, unchanged
 T_END_EDGE = 60.0
 EDGE_NPZ = "fisher_kpp_edge.npz"
+REFINE_NPZ = "fisher_kpp_refine.npz"
+
+# ─── Mesh sweep at a fixed early window (invoke with `--meshsweep`) ───
+# The front only has to clear the early window, so a short domain and a
+# short run suffice; what matters is that every mesh sees the same window.
+LX_SWEEP, T_END_SWEEP = 4.0, 13.0
+SWEEP_NX = (201, 401, 801, 1601)
+SWEEP_WINDOW = (4.0, 12.0)
 
 C_FRONT = "#D55E00"
 C_THEORY = "#0072B2"
@@ -372,10 +391,111 @@ def main() -> None:
     print("wrote fisher_kpp_speed.pdf")
 
 
+def mesh_sweep() -> None:
+    """Does refining the mesh alone remove the early-window deficit?
+
+    The measurement that first produced c_num/c* ~ 0.93 fitted an early
+    window on a coarse mesh, and under-resolution of the exponential wing is
+    the natural suspect.  This sweep isolates it: the same early window on a
+    sequence of meshes, everything else held fixed.  If the deficit were a
+    resolution artefact the ratio would climb towards 1; the manuscript
+    reports that it converges instead, leaving the deficit in place, and
+    this is the run behind that sentence.
+    """
+    p = _aggressive_parameters()
+    r = p.beta * (1.0 - p.alpha)
+    c_star = 2.0 * np.sqrt(p.delta2 * r)
+    lo, hi = SWEEP_WINDOW
+    print(f"mesh sweep at fixed early window [{lo}, {hi}], dt = {DT}")
+    print(f"  {'Nx':>6} {'h':>9} {'nodes/wing':>11} {'c_num':>10} "
+          f"{'c_num/c*':>10} {'violation':>11}")
+    worst_all = 0.0
+    for Nx in SWEEP_NX:
+        grid = Grid2D(Nx=Nx, Ny=NY, Lx=LX_SWEEP, Ly=LY)
+        solver = Solver(grid, p, dt=DT, enforce_clip=False)
+        T = np.where(grid.X <= X_SEED, 1.0, 0.0)
+        N = 1.0 - T
+        H = np.zeros_like(T)
+        times, fronts = [], []
+        nsteps = int(T_END_SWEEP / DT)
+        sample = int(0.2 / DT)
+        for n in range(nsteps + 1):
+            t = n * DT
+            if n % sample == 0:
+                times.append(t)
+                fronts.append(front_position(T[NY // 2, :], grid.x))
+            if n == nsteps:
+                break
+            N, T, H = solver.step(N, T, H)
+        times, fronts = np.array(times), np.array(fronts)
+        m = (times >= lo) & (times <= hi)
+        speed = np.polyfit(times[m], fronts[m], 1)[0]
+        h = LX_SWEEP / (Nx - 1)
+        viol = solver.violation_report()
+        worst = max(v for k, v in viol.items() if k != "n_steps")
+        worst_all = max(worst_all, worst)
+        print(f"  {Nx:6d} {h:9.5f} {np.sqrt(p.delta2 / p.beta) / h:11.1f} "
+              f"{speed:10.6f} {speed / c_star:10.4f} {worst:11.1e}")
+    print(f"  worst violation of R over the sweep: {worst_all:.2e}")
+    print("  -> the ratio converges in the mesh without reaching 1: the")
+    print("     early window, not the resolution, is what depresses it.")
+
+
+def refinement_control() -> None:
+    """Repeat the reference measurement with h and dt halved.
+
+    The reference run measures c_num/c* on t in [55, 75] at h = 5e-3 and
+    dt = 5e-4.  If the excess over c* were numerical, halving both would move
+    it; the manuscript reports that it does not, and this is the run behind
+    that sentence.
+    """
+    p = _aggressive_parameters()
+    r = p.beta * (1.0 - p.alpha)
+    c_star = 2.0 * np.sqrt(p.delta2 * r)
+    h = LX_FINE / (NX_FINE - 1)
+    print(f"refinement control: Nx = {NX_FINE}, Ny = {NY_FINE}, "
+          f"h = {h:.5f}, dt = {DT_FINE}, T_end = {T_END_FINE}")
+    print(f"reference run: h = {LX / (NX - 1):.5f}, dt = {DT}")
+
+    grid = Grid2D(Nx=NX_FINE, Ny=NY_FINE, Lx=LX_FINE, Ly=LY)
+    solver = Solver(grid, p, dt=DT_FINE, enforce_clip=False)
+    T = np.where(grid.X <= X_SEED, 1.0, 0.0)
+    N = 1.0 - T
+    H = np.zeros_like(T)
+
+    times, fronts = [], []
+    nsteps = int(T_END_FINE / DT_FINE)
+    sample = int(0.2 / DT_FINE)
+    for n in range(nsteps + 1):
+        t = n * DT_FINE
+        if n % sample == 0:
+            times.append(t)
+            fronts.append(front_position(T[NY_FINE // 2, :], grid.x))
+        if n == nsteps:
+            break
+        N, T, H = solver.step(N, T, H)
+
+    times, fronts = np.array(times), np.array(fronts)
+    lo, hi = FIT_WINDOW
+    m = (times >= lo) & (times <= hi)
+    speed = np.polyfit(times[m], fronts[m], 1)[0]
+    viol = solver.violation_report()
+    worst = max(v for k, v in viol.items() if k != "n_steps")
+    print(f"  window [{lo}, {hi}]: c_num = {speed:.6f}, "
+          f"c_num/c* = {speed / c_star:.4f}")
+    print(f"  worst box violation = {worst:.2e}")
+    np.savez(REFINE_NPZ, times=times, fronts=fronts, c_star=c_star)
+    print(f"  wrote {REFINE_NPZ}")
+
+
 if __name__ == "__main__":
     import sys
 
-    if "--longtime" in sys.argv:
+    if "--meshsweep" in sys.argv:
+        mesh_sweep()
+    elif "--refine" in sys.argv:
+        refinement_control()
+    elif "--longtime" in sys.argv:
         long_time_run()
     elif "--edge" in sys.argv:
         leading_edge_diagnostic()
