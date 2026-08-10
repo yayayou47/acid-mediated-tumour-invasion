@@ -103,7 +103,7 @@ Please cite the paper and, if the code itself is used, the archived release. Met
 
 Source: <https://github.com/yayayou47/acid-mediated-tumour-invasion>
 
-Archive: <https://doi.org/10.5281/zenodo.21878724> (`10.5281/zenodo.21878724`), the concept DOI, which always resolves to the latest version. The release accompanying the submitted manuscript is `10.5281/zenodo.21878725`.
+Archive: <https://doi.org/10.5281/zenodo.21878724>, the concept DOI, which always resolves to the latest version of the deposit.
 
 ## Contact
 
