@@ -1,6 +1,6 @@
 {
   "title": "Code and figures for \"Well-posedness, Stability, and Bifurcation in an Acid-Mediated Tumour Invasion Model with Interspecific Competition\"",
-  "description": "<p>Solver, symbolic verifications and figure generators for a three-component reaction&ndash;diffusion model of acid-mediated tumour invasion with interspecific competition. Includes the IMEX solver with a ghost-node Neumann Laplacian, the bifurcation and stability analysis, the bisection campaign for the critical seed radius with its cached results, the Fisher&ndash;KPP front-speed measurement, and the nine figures of the manuscript as submitted.</p><p>Accompanies manuscript BMAB-D-26-00386, submitted to <em>Bulletin of Mathematical Biology</em>.</p>",
+  "description": "<p>Solver, symbolic verifications and figure generators for a three-component reaction&ndash;diffusion model of acid-mediated tumour invasion with interspecific competition. Includes the IMEX solver with a ghost-node Neumann Laplacian, the bifurcation and stability analysis, the bisection campaign for the critical seed radius with its cached results, the Fisher&ndash;KPP front-speed measurement, the nine figures of the manuscript as submitted, and the Supplementary Material of the manuscript, which states the analytical results the scripts verify.</p><p>Accompanies manuscript BMAB-D-26-00386, submitted to <em>Bulletin of Mathematical Biology</em>.</p>",
   "license": "MIT",
   "upload_type": "software",
   "access_right": "open",
