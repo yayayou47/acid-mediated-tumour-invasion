@@ -1,0 +1,6 @@
+# Tested with Python 3.10 and the versions below; earlier minors of each
+# package are expected to work, the code uses no recent API.
+numpy>=1.20
+scipy>=1.8
+matplotlib>=3.5
+sympy>=1.10

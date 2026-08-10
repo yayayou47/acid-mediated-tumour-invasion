@@ -52,7 +52,6 @@ C_E1 = "#0072B2"     # blue      -- tumour-free suppression
 C_E3 = "#009E73"     # green     -- coexistence
 C_E2 = "#D55E00"     # vermilion -- full invasion
 C_BI = "#CC79A7"     # purple    -- bistable, E3 = saddle
-C_OPEN = "#5a5a5a"   # grey      -- analytically open slice
 
 A_MAX, Y_MAX = 2.2, 3.4                       # axes limits, y = delta/delta_c
 
@@ -64,15 +63,6 @@ def n_star(alpha: float, y: np.ndarray | float) -> np.ndarray | float:
     so N* = (omega - delta gamma)/(omega - alpha delta gamma) = (1-y)/(1-alpha*y).
     """
     return (1.0 - y) / (1.0 - alpha * y)
-
-
-def hl_holds(alpha: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """Sylvester condition (HL): alpha^2 beta < 4 and Delta > 0."""
-    delta = y * DELTA_C
-    cond1 = alpha**2 * BETA < 4.0
-    Delta = (4 * BETA * OMEGA - GAMMA**2 - alpha**2 * BETA**2 * OMEGA
-             - alpha * BETA * delta * GAMMA - BETA * delta**2)
-    return cond1 & (Delta > 0)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -96,32 +86,12 @@ def panel_plane(ax) -> None:
                                edgecolor=colour, hatch=hatch, linewidth=0,
                                zorder=1))
 
-    # --- the analytically open slice  1 < y <= 1/(1-alpha) -------------
-    a_open = np.linspace(0.0, 1.0, 400, endpoint=False)
-    y_upper = np.minimum(1.0 / (1.0 - a_open), Y_MAX)
-    ax.fill_between(a_open, 1.0, y_upper, facecolor="none", edgecolor=C_OPEN,
-                    hatch="|||", linewidth=0.0, alpha=0.45, zorder=1)
-    ax.plot(a_open, y_upper, color=C_OPEN, lw=1.4, ls=(0, (5, 2)), zorder=3)
-    ax.annotate(r"$\delta(1-\alpha)=\delta_c$", xy=(0.60, 1 / (1 - 0.60)),
-                xytext=(0.80, 3.05), fontsize=8.5, color=C_OPEN, zorder=6,
-                ha="right",
-                bbox=dict(fc="w", ec="none", alpha=0.85, pad=1.2),
-                arrowprops=dict(arrowstyle="-", lw=0.8, color=C_OPEN,
-                                shrinkA=2, shrinkB=2))
-
-    # --- (HL): where the Volterra functional fails to certify E3 -------
-    aa, yy = np.meshgrid(np.linspace(0, 1, 500), np.linspace(0, 1, 500))
-    fails = (~hl_holds(aa, yy)).astype(float)
-    ax.contourf(aa, yy, fails, levels=[0.5, 1.5], colors=["#767676"],
-                alpha=0.30, zorder=2)
-    ax.contour(aa, yy, fails, levels=[0.5], colors=["#3a3a3a"],
-               linewidths=1.2, linestyles=[(0, (1, 1.6))], zorder=3)
-    ax.annotate("(HL) fails:\n$E_3$ locally but not\nprovably globally stable",
-                xy=(0.92, 0.52), xytext=(0.74, 0.13), fontsize=7.4,
-                color="#3a3a3a", zorder=6, ha="center",
-                bbox=dict(fc="w", ec="none", alpha=0.85, pad=1.2),
-                arrowprops=dict(arrowstyle="-", lw=0.8, color="#3a3a3a",
-                                shrinkA=2, shrinkB=2))
+    # The slice 1 < y <= 1/(1-alpha) and the wedge where the Volterra
+    # criterion (HL) fails were both drawn here in earlier versions.  Neither
+    # is a feature of the dynamics: the order argument of Theorem 3.x covers
+    # the slice, and (HL) constrains the Lyapunov certificate, not the result.
+    # Global convergence now holds on each of the three non-bistable regions
+    # without qualification, so the plane is drawn without them.
 
     # --- the two transcritical curves and the codim-2 point ------------
     ax.axvline(1.0, color="k", lw=1.8, zorder=4)
@@ -137,17 +107,14 @@ def panel_plane(ax) -> None:
             fontsize=10, zorder=6)
 
     # --- direct in-region labels (identity never rests on colour) ------
-    ax.text(0.55, 0.66, "$E_3$  stable\ncoexistence",
+    ax.text(0.55, 0.66, "$E_3$  attracts all\ninterior data",
             ha="center", va="center", fontsize=10.5, color="#123", zorder=5)
-    ax.text(0.40, 2.45, "$E_2$  stable\nfull invasion",
+    ax.text(0.40, 2.45, "$E_2$  attracts all\ninterior data",
             ha="center", va="center", fontsize=10.5, color="#123", zorder=5)
-    ax.text(1.62, 0.55, "$E_1$  stable\ntumour-free",
+    ax.text(1.62, 0.55, "$E_1$  attracts all\ninterior data",
             ha="center", va="center", fontsize=10.5, color="#123", zorder=5)
-    ax.text(1.62, 2.45, "$E_1\\,/\\,E_2$  bistable\n$E_3$ = saddle",
+    ax.text(1.62, 2.45, "$E_1\\,/\\,E_2$  bistable\n$E_3$ = saddle\n(no global result)",
             ha="center", va="center", fontsize=10.5, color="#123", zorder=5)
-    ax.text(0.135, 1.30, "open", ha="center", va="center", fontsize=8.5,
-            style="italic", color=C_OPEN, rotation=70, zorder=5,
-            bbox=dict(fc="w", ec="none", alpha=0.75, pad=0.8))
 
     # --- the three phenotypes of Table 2 -------------------------------
     for ph in PHENOTYPES:
