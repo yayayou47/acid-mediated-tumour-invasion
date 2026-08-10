@@ -35,14 +35,14 @@ keywords:
   - reaction-diffusion
   - bifurcation analysis
   - reproducibility
-doi: 10.5281/zenodo.21878725
+doi: 10.5281/zenodo.21878724
 identifiers:
-  - type: doi
-    value: 10.5281/zenodo.21878725
-    description: This version of the archived release.
   - type: doi
     value: 10.5281/zenodo.21878724
     description: Concept DOI, always resolving to the latest version.
+  - type: doi
+    value: 10.5281/zenodo.21878725
+    description: The release accompanying the submitted manuscript.
 repository-code: 'https://github.com/yayayou47/acid-mediated-tumour-invasion'
 preferred-citation:
   type: article
