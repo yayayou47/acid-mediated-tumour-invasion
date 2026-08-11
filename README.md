@@ -20,7 +20,7 @@ The nine figures of the manuscript, exactly as submitted, are in `figures/`, so 
 | **`main.py`** | The solver (`Parameters`, `Grid2D`, `Solver`) and most figure generators. The scheme is IMEX: five-point Laplacian with homogeneous Neumann conditions imposed by ghost nodes, assembled as a Kronecker sum; backward-Euler diffusion with sparse LU factorisations computed once and reused; explicit reaction. |
 | **`bifurcation_plane.py`** | The (α, δ/δ_c) phase portrait and the two transcritical bifurcation diagrams (Fig. 1). Purely analytic: it plots the closed-form equilibrium expressions, with no simulation involved. |
 | **`bistability.py`** | The bistable regime (Fig. 7): two runs with *identical* parameters, differing only in the radius of the initial tumour seed, converging to opposite equilibria. Also reports the reflection asymmetry of each run, the kill time and the receding fraction. |
-| **`critical_radius.py`** | The measurement campaign behind the size threshold: bisection of the critical seed radius across box sizes, diffusivity ratios, acid clearance rates, seed shapes, seed densities and seed positions. Results are cached in `critical_radius_results.json` and re-tabulated by `--report-only` without re-running anything. |
+| **`critical_radius.py`** | The measurement campaign behind the size threshold: bisection of the critical seed radius across box sizes, diffusivity ratios, acid clearance rates, seed shapes, seed densities and seed positions. Its results are cached in `critical_radius_results.json`, which ships with the Zenodo archive; with that file in the working directory, `--report-only` re-tabulates the whole campaign without re-running anything. |
 | **`fisher_kpp.py`** | The travelling-front speed (Fig. 8), measured on a fine mesh over successive late time windows. See the note below. |
 | **`bistability_sweep.py`** | A coarse mesh-independence check on the bistability threshold, kept as the historical entry point that preceded the bisection campaign. |
 | **`supplementary.pdf`** | The Supplementary Material of the manuscript (14 pp.), which states the results the scripts verify and indexes the symbolic checks by section. |
@@ -63,7 +63,7 @@ Each run prints a short report — parameter values, observed convergence orders
 The measurement campaign itself is expensive and is therefore shipped with its results:
 
 ```bash
-python3 critical_radius.py --report-only          # instant, reads the cache
+python3 critical_radius.py --report-only          # instant, needs the cached JSON
 python3 critical_radius.py --all --workers 4      # re-runs everything (many hours)
 python3 critical_radius.py domains screening      # re-runs two experiments only
 ```
@@ -97,7 +97,7 @@ MIT, see `LICENSE`.
 
 ## Citing this code
 
-Please cite the paper and, if the code itself is used, the archived release. Metadata for both is in `CITATION.cff`.
+Please cite the paper and, if the code itself is used, the archived release, <https://doi.org/10.5281/zenodo.21878724>.
 
 ## Repository and archive
 
