@@ -34,15 +34,17 @@ successive late windows, the ratio rises to c* and slightly past it (1.004 on
 The front is therefore weakly PUSHED, by 0.53%.  `--edge` shows why.
 Far ahead the state is exactly (1,0,0), so c* = 2 sqrt(delta2 beta (1-alpha))
 IS the linear spreading speed; but acid generated in the front diffuses ahead
-and depresses N, so the growth rate beta(1-alpha N) felt inside the front
-exceeds the nominal beta(1-alpha) -- by 11.7% at T = 1e-1, 4.1% at 1e-3, 1.1%
-at 1e-6, decaying to 0 as T -> 0 and N -> 1.  Vanishing at the leading edge,
-it cannot change the linear speed; substantial in the interior, it makes the
+and depresses N, so the per-capita growth beta(1-T-alpha N) exceeds the
+nominal beta(1-alpha) wherever T < alpha(1-N): on the whole forward wing,
+T < 0.07, by 5.2% at T = 1e-2, 4.0% at 1e-3, 1.1% at 1e-6, decaying to 0 as
+T -> 0 and N -> 1 (`--kpp-set`).  Vanishing at the leading edge, the excess
+cannot change the linear speed; present across the wing, it makes the
 nonlinear front outrun its own linearisation.  Agreement with c* is better
 than 1%, on the side the minimal-speed principle requires.
 
 Produces `fisher_kpp_speed.pdf` (default), `fisher_kpp_longtime.npz`
-(`--longtime`), `fisher_kpp_edge.npz` (`--edge`).
+(`--longtime`), `fisher_kpp_edge.npz` (`--edge`), `values_kpp_violation.tex`
+(`--kpp-set`, from the saved edge profile).
 
 Author: Yaya Youssouf Yaya
 Date:   2026-07-13
@@ -146,7 +148,7 @@ def long_time_run() -> None:
         would make the ratio fall back towards 1 as t grows;
       * a genuinely (weakly) pushed front -- the acid diffuses ahead of
         the leading edge and depresses N there, so the effective growth
-        rate beta(1 - alpha N) exceeds the nominal beta(1 - alpha) that
+        rate beta(1 - T - alpha N) exceeds the nominal beta(1 - alpha) that
         defines c* -- which would make the ratio settle ABOVE 1, and in
         fact rise slightly further as the Bramson deficit
         3/(2 lambda* t) dies off.
@@ -223,7 +225,8 @@ def leading_edge_diagnostic() -> None:
     on the growth rate beta(1-alpha) frozen at N = 1.  The proposed
     mechanism is that acid produced inside the front diffuses a short
     way ahead of it and depresses N there, so that the growth rate the
-    leading edge actually experiences, beta(1 - alpha N), is larger.
+    leading edge actually experiences, beta(1 - T - alpha N), is larger
+    wherever T < alpha (1 - N).
 
     This routine integrates to a moderate late time (the excess is
     already saturated to within 0.2% by t = 60) and reports N and H at
@@ -253,13 +256,13 @@ def leading_edge_diagnostic() -> None:
     # N, H and the local growth-rate enhancement, sampled on successive
     # decades of T going out through the wing towards the leading edge
     print("      T level        x     x-x_half        N          H     "
-          "  beta(1-aN)/beta(1-a)-1")
+          "  beta(1-T-aN)/beta(1-a)-1")
     for lev in (1e-1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8, 1e-10):
         i = np.where(Tp >= lev)[0]
         if len(i) == 0:
             continue
         k = i[-1]
-        exc = (1 - p.alpha * Np[k]) / (1 - p.alpha) - 1.0
+        exc = (1 - Tp[k] - p.alpha * Np[k]) / (1 - p.alpha) - 1.0
         print(f"  {lev:9.0e}  {x[k]:8.4f}  {x[k]-x_half:+9.3f}  "
               f"{Np[k]:9.6f}  {Hp[k]:9.3e}  {exc*100:+9.3f}%")
 
@@ -488,6 +491,59 @@ def refinement_control() -> None:
     print(f"  wrote {REFINE_NPZ}")
 
 
+KPP_TEX = "values_kpp_violation.tex"
+T_FLOOR = 1e-8     # below this T the profile is round-off, not front
+
+
+def kpp_set_report() -> None:
+    """Locate where the KPP condition f(T) <= f'(0) T actually fails.
+
+    With f(T) = beta T (1 - T - alpha N) and f'(0) = beta (1 - alpha) at the
+    state (1, 0, 0) ahead of the front, the condition fails exactly on the
+    set {0 < T < alpha (1 - N)}: N must be depressed by more than T / alpha.
+    It is NOT the whole set {N < 1}, as R1 of the manuscript stated, and the
+    per-capita growth to compare with beta (1 - alpha) is beta (1 - T -
+    alpha N), self-limitation included; R1 quoted beta (1 - alpha N), which
+    overstates the excess in the body of the front (11.7% at T = 0.1, where
+    the true per-capita rate is in DEFICIT).
+
+    This routine reads the profile saved by `--edge` (no new integration)
+    and writes to `values_kpp_violation.tex`: the node counts, the largest T
+    on the failure set and its offset from the half-level position, and
+    the per-capita excess at three levels of T going out to the edge.
+    """
+    p = _aggressive_parameters()
+    d = np.load(EDGE_NPZ)
+    x, N, T = d["x"], d["N"], d["T"]
+    x_half = float(d["x_half"])
+    front = T > T_FLOOR
+    fails = front & (T < p.alpha * (1.0 - N))
+    excess = (1.0 - T - p.alpha * N) / (1.0 - p.alpha) - 1.0
+    wing = front & (T < T[fails].max() * (1 + 1e-12))
+    inner = x[fails].min() - x_half
+    print(f"KPP failure set at t = {float(d['t'])}, alpha = {p.alpha}")
+    print(f"  nodes with T > {T_FLOOR:g}             : {front.sum()}")
+    print(f"  of which N < 1                     : {(front & (N < 1)).sum()}")
+    print(f"  of which T < alpha (1 - N)         : {fails.sum()}")
+    print(f"  nodes of the wing below max T there: {wing.sum()}")
+    print(f"  failure set: T < {T[fails].max():.4f}, "
+          f"from x - x_half = {inner:+.3f} to the edge")
+    print(f"  largest per-capita excess          : {100*excess[fails].max():.2f}%")
+    lines = ["% Generated by fisher_kpp.py --kpp-set; do not edit.",
+             f"\\newcommand{{\\kppFrontNodes}}{{{front.sum()}}}",
+             f"\\newcommand{{\\kppFailNodes}}{{{fails.sum()}}}",
+             f"\\newcommand{{\\kppFailTmax}}{{{T[fails].max():.2f}}}",
+             f"\\newcommand{{\\kppFailInner}}{{{inner:.2f}}}",
+             f"\\newcommand{{\\kppMaxExcess}}{{{100*excess[fails].max():.1f}}}"]
+    for name, lev in (("A", 1e-1), ("B", 1e-2), ("C", 1e-3), ("D", 1e-6)):
+        k = np.where(T >= lev)[0][-1]
+        print(f"  per-capita excess at T = {lev:.0e}      : {100*excess[k]:+.2f}%")
+        lines.append(f"\\newcommand{{\\kppExcess{name}}}"
+                     f"{{{100*excess[k]:.1f}}}")
+    with open(KPP_TEX, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    print(f"  wrote {KPP_TEX}")
+
 if __name__ == "__main__":
     import sys
 
@@ -499,5 +555,7 @@ if __name__ == "__main__":
         long_time_run()
     elif "--edge" in sys.argv:
         leading_edge_diagnostic()
+    elif "--kpp-set" in sys.argv:
+        kpp_set_report()
     else:
         main()
