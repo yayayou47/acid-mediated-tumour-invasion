@@ -156,9 +156,13 @@ class Grid2D:
 
 
 # Set by `boundary_order_control()` to build the WRONG boundary rows on
-# purpose, the ones appropriate to a cell-centred grid.  The manuscript
-# claims that this alone pulls the observed spatial order down to one, and
-# the claim is worth a run rather than an assertion.
+# purpose, the halved form (u_1 - u_0)/h^2 appropriate to a cell-centred
+# grid.  The manuscript claims that this alone pulls the observed spatial
+# order down to one, and the claim is worth a run rather than an assertion.
+# Until revision R2 the flag only halved the off-diagonal entry, which built
+# (u_1 - 2 u_0)/h^2, a Dirichlet-like row (ghost value 0), and the numbers
+# printed in R1 were those of that row; `test_boundary_rows.py` now pins
+# down the first row of each variant.
 BOUNDARY_HALVED = False
 
 
@@ -170,8 +174,10 @@ def _tridiagonal_neumann(n: int, h: float):
     u_1, and the first row of the operator is 2(u_1 - u_0)/h^2.  Writing
     (u_1 - u_0)/h^2 instead -- half of that -- is a common slip and it costs
     the whole boundary layer: the truncation error there is then O(1) rather
-    than O(h^2), which degrades the solution to first order overall and breaks
-    the discrete divergence theorem.  With the reflection below, the weighted
+    than O(h^2) (it approximates u''/2), which degrades the solution to first
+    order overall.  That form conserves the plain sum, the quadrature of a
+    cell-centred grid, not the trapezoidal one that matches nodes lying on
+    the boundary.  With the reflection below, the weighted
     sum sum_i w_i (A u)_i vanishes to round-off for the trapezoidal weights
     w = (1/2, 1, ..., 1, 1/2), so the scheme conserves exactly what the
     continuous problem conserves.
@@ -179,9 +185,14 @@ def _tridiagonal_neumann(n: int, h: float):
     main_diag = -2.0 * np.ones(n)
     upper = np.ones(n - 1)
     lower = np.ones(n - 1)
-    factor = 1.0 if BOUNDARY_HALVED else 2.0
-    upper[0] = factor         # row 0    : ghost node u_{-1} = u_1
-    lower[-1] = factor        # row n-1  : ghost node u_n   = u_{n-2}
+    if BOUNDARY_HALVED:
+        # (u_1 - u_0)/h^2 : both the diagonal and the off-diagonal entry
+        # of the end rows are halved, so the row still annihilates constants
+        main_diag[0] = main_diag[-1] = -1.0
+        upper[0] = lower[-1] = 1.0
+    else:
+        upper[0] = 2.0        # row 0    : ghost node u_{-1} = u_1
+        lower[-1] = 2.0       # row n-1  : ghost node u_n   = u_{n-2}
     return diags([lower, main_diag, upper], [-1, 0, 1], shape=(n, n)) / h**2
 
 
@@ -514,6 +525,71 @@ def fig_bifurcation():
     print("  -> bifurcation_diagram.pdf\n")
 
 
+BIFCHECK_TEX = "values_bifurcation_check.tex"
+
+
+def bifurcation_residual_check(t_short=18.0, t_long=72.0):
+    """Why the markers of the bifurcation diagram leave the curve near delta_c.
+
+    The diagram plots <N> at the fixed time t = 18 against the equilibrium
+    value N*(delta).  Near the transcritical point the decay rate predicted
+    by the linearisation at the limit state vanishes, so a fixed final time
+    cannot be long enough there.  This routine repeats the sweep, reports
+    for each delta the departure |<N>(18) - N_lim| next to the predicted
+    rate, and re-runs the worst case to t = 72: if the departure is a
+    transient it must shrink, at about the predicted rate.
+    """
+    print("=" * 60)
+    print("Control: bifurcation-diagram departures near delta_c")
+    print("=" * 60)
+    p = MODERATE
+    delta_c = p.omega / p.gamma
+    delta_values = np.concatenate([
+        np.linspace(0.1, delta_c - 0.3, 8),
+        np.linspace(delta_c - 0.25, delta_c + 0.25, 8),
+        np.linspace(delta_c + 0.3, 4.0, 6),
+    ])
+    grid_b = Grid2D(Nx=60, Ny=60, Lx=DOMAIN_LX, Ly=DOMAIN_LY)
+    ic_b = InitialCondition(grid_b, seed=SEED)
+    N0b, T0b, H0b = ic_b.random_foci(n_tumors=5, n_acid=6)
+    rows = []
+    for dv in delta_values:
+        params = Parameters(alpha=p.alpha, beta=p.beta, gamma=p.gamma,
+                            delta=dv, omega=p.omega,
+                            delta1=p.delta1, delta2=p.delta2)
+        if dv < delta_c:
+            lim = np.array(params.E3)
+        else:
+            lim = np.array([0.0, 1.0, p.gamma / p.omega])
+        rate = _linear_rate(params, lim)
+        solver = Solver(grid_b, params, dt=8e-3)
+        snaps = solver.run(N0b, T0b, H0b, t_short, [t_short])
+        dep = abs(float(np.mean(snaps[t_short][0])) - lim[0])
+        rows.append((dv, dep, rate, params, lim))
+        print(f"  delta={dv:.3f}  |<N>-N_lim|={dep:.3e}  "
+              f"predicted rate={rate:.4f}  exp(-rate*{t_short:g})="
+              f"{np.exp(-rate * t_short):.3e}")
+    dv, dep, rate, params, lim = max(rows, key=lambda r: r[1])
+    solver = Solver(grid_b, params, dt=8e-3)
+    snaps = solver.run(N0b, T0b, H0b, t_long, [t_long])
+    dep_long = abs(float(np.mean(snaps[t_long][0])) - lim[0])
+    meas = np.log(dep / dep_long) / (t_long - t_short)
+    far = max(r[1] for r in rows if abs(r[0] - delta_c) >= 0.3 - 1e-9)
+    print(f"  worst: delta={dv:.3f}, departure {dep:.3e} at t={t_short:g}, "
+          f"{dep_long:.3e} at t={t_long:g}; measured rate {meas:.4f} "
+          f"vs predicted {rate:.4f}")
+    print(f"  largest departure with |delta-delta_c| >= 0.3: {far:.1e}")
+    lines = ["% Generated by main.py --bif-check; do not edit.",
+             f"\\newcommand{{\\bfWorstDelta}}{{{dv:.3f}}}",
+             f"\\newcommand{{\\bfWorstDep}}{{{dep:.3f}}}",
+             f"\\newcommand{{\\bfWorstDepLong}}{{{_tex_sci(dep_long)}}}",
+             f"\\newcommand{{\\bfWorstRate}}{{{rate:.3f}}}",
+             f"\\newcommand{{\\bfWorstRateMeas}}{{{meas:.3f}}}",
+             f"\\newcommand{{\\bfFarDep}}{{{_tex_sci(far)}}}"]
+    with open(BIFCHECK_TEX, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    print(f"  wrote {BIFCHECK_TEX}\n")
+
 # ══════════════════════════════════════════════════════════════════════
 # 5. FIGURE 3 -- LYAPUNOV DECAY FOR MULTIPLE delta
 # ══════════════════════════════════════════════════════════════════════
@@ -831,6 +907,7 @@ def fig_sup_norm():
     t_end = 60.0
 
     fig, ax = plt.subplots(figsize=(7.0, 4.6), constrained_layout=True)
+    rates = []
     for (pheno, label), colour in zip(scenarios, colours):
         params = from_phenotype(pheno)
         limit, name = _limit_state(params)
@@ -847,13 +924,23 @@ def fig_sup_norm():
             if n == int(t_end / DT):
                 break
             N, T, H = solver.step(N, T, H)
-        ax.semilogy(ts, errs, color=colour, lw=1.9,
-                    label=f"{label}, limit {name}")
+        (line,) = ax.semilogy(ts, errs, color=colour, lw=1.9)
         # Measured decay rate against the linearisation, and the residual at
         # the instant of the regime-overlay figure.  Both are quoted in the
         # text, so both are computed here rather than asserted there.
         rate, window = _fitted_rate(ts, errs)
         pred = _linear_rate(params, limit)
+        # The predicted slope, drawn over the fitting window and anchored at
+        # its first point, so that the agreement quoted in the text is seen.
+        tw = np.asarray(ts)
+        m = (tw >= window[0]) & (tw <= window[1])
+        e0 = np.asarray(errs)[m][0]
+        ax.semilogy(tw[m], 3.0 * e0 * np.exp(-pred * (tw[m] - window[0])),
+                    color="black", lw=1.0, ls="--",
+                    label="linearisation rate (offset)" if not rates else None)
+        line.set_label(f"{label}, limit {name}: rate {rate:.3f} "
+                       f"(linearisation {pred:.3f})")
+        rates.append((rate, pred))
         at6 = errs[int(np.argmin(np.abs(np.asarray(ts) - 6.0)))]
         viol = solver.violation_report()
         worst = max(v for k, v in viol.items() if k != "n_steps")
@@ -867,10 +954,21 @@ def fig_sup_norm():
     ax.set_ylabel(r"$\|u(\cdot,t) - E\|_{L^\infty(\Omega)}$")
     ax.set_title("Uniform convergence in the three non-bistable regimes")
     ax.grid(True, which="both", alpha=0.25)
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, fontsize=8, loc="upper center",
+              bbox_to_anchor=(0.5, -0.14), ncol=1)
     plt.savefig("sup_norm_convergence.pdf", dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print("  -> sup_norm_convergence.pdf\n")
+    print("  -> sup_norm_convergence.pdf")
+    lines = ["% Generated by main.py --sup-norm; do not edit."]
+    for key, (rate, pred) in zip(("One", "Three", "Two"), rates):
+        lines.append(f"\\newcommand{{\\snFit{key}}}{{{rate:.3f}}}")
+        lines.append(f"\\newcommand{{\\snPred{key}}}{{{pred:.3f}}}")
+    with open(SUPNORM_TEX, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    print(f"  wrote {SUPNORM_TEX}\n")
+
+
+SUPNORM_TEX = "values_sup_norm.tex"
 
 
 def boundary_order_control(Nx_list=(51, 101, 201, 401)):
@@ -889,6 +987,7 @@ def boundary_order_control(Nx_list=(51, 101, 201, 401)):
     print("=" * 60)
     p = from_phenotype(MODERATE)
     dt, T_end = 2.5e-3, 4.0
+    results = {}
     for halved in (False, True):
         BOUNDARY_HALVED = halved
         fields = []
@@ -906,7 +1005,34 @@ def boundary_order_control(Nx_list=(51, 101, 201, 401)):
         print(f"  {label:22} errors " +
               " ".join(f"{e:.2e}" for e in errs) +
               "   orders " + " ".join(f"{o:.3f}" for o in orders))
+        results["Halved" if halved else "Ghost"] = (errs, orders)
     BOUNDARY_HALVED = False
+    _write_boundary_macros(results)
+
+
+BOUNDARY_TEX = "values_boundary_control.tex"
+
+
+def _tex_sci(x):
+    r"""1.94e-02 -> 1.9\cdot 10^{-2}, two significant digits as in the text."""
+    m, e = f"{x:.1e}".split("e")
+    return f"{m}\\cdot 10^{{{int(e)}}}"
+
+
+def _write_boundary_macros(results):
+    """Write the control's numbers as LaTeX macros, so that no figure of
+    Section 4.2 or of the Supplementary is typed by hand."""
+    lines = ["% Generated by main.py --boundary-control; do not edit."]
+    for key, (errs, orders) in results.items():
+        for i, e in enumerate(errs):
+            lines.append(f"\\newcommand{{\\bc{key}Err{'ABC'[i]}}}"
+                         f"{{{_tex_sci(e)}}}")
+        for i, o in enumerate(orders):
+            lines.append(f"\\newcommand{{\\bc{key}Ord{'AB'[i]}}}"
+                         f"{{{o:.2f}}}")
+    with open(BOUNDARY_TEX, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    print(f"  wrote {BOUNDARY_TEX}")
 
 
 def fig_macroscopic_evolution():
@@ -998,6 +1124,17 @@ def fig_macroscopic_evolution():
 # ══════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+    import sys
+
+    if "--boundary-control" in sys.argv:
+        boundary_order_control()
+        sys.exit(0)
+    if "--bif-check" in sys.argv:
+        bifurcation_residual_check()
+        sys.exit(0)
+    if "--sup-norm" in sys.argv:
+        fig_sup_norm()
+        sys.exit(0)
     print("\n" + "=" * 70)
     print("Acid-mediated tumor invasion -- regenerating all manuscript figures")
     print("=" * 70 + "\n")
