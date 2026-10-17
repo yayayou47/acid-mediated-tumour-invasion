@@ -2,9 +2,9 @@
 params.py — Single source of truth for the parameter values
 used across all simulations and figures of the manuscript.
 
-The three phenotypes match Table 2 of the manuscript exactly.
-Any change here must be reflected in the manuscript (Table 2 and
-the captions of Figures 3-5).
+The three phenotypes match Table 1 of the manuscript exactly.
+Any change here must be reflected in the manuscript (Table 1 and
+the figure captions of Section 4).
 
 Author: Yaya Youssouf Yaya
 Date:   2026-04-18
@@ -17,12 +17,10 @@ from dataclasses import dataclass
 class Phenotype:
     """Nondimensional parameters for one tumor phenotype.
 
-    Attributes follow Table 2 of the manuscript.
-    The strict diffusion coefficients δ₁, δ₂ are kept as small but
-    NOT biologically tiny (10⁻⁵), so that fronts and interfaces
-    remain numerically resolvable on a 100×100 grid in
-    reasonable wall-clock time.  The biologically realistic values
-    (~10⁻⁴ for cell vs H⁺) are used in the convergence study only.
+    Attributes follow Table 1 of the manuscript.
+    The cell diffusivities δ₁ = δ₂ = 5·10⁻³ are deliberately larger
+    than the biological ratio (~10⁻⁴, cell vs H⁺), which would need a
+    grid an order of magnitude finer than the 100×100 grid used here.
     """
     name: str
     alpha: float
@@ -40,13 +38,13 @@ class Phenotype:
         return self.omega / self.gamma
 
 
-# ─── Three canonical phenotypes (Table 2 of the manuscript) ──────────
-# The (γ, ω) pair is chosen so that the corrected sufficient
-# condition (HL) holds for the moderate phenotype
-# (with c_i = 1). The aggressive phenotype lies in the E_2 invasion
-# regime, where (HL) is not relevant (global stability of E2 governs).
-# The indolent phenotype illustrates the E_1-stability case (alpha > 1),
-# which does not invoke the Lyapunov framework either.
+# ─── Three canonical phenotypes (Table 1 of the manuscript) ──────────
+# The moderate phenotype lies on branch (i), where the Volterra
+# functional with the optimal weights of the Supplementary decreases;
+# the canonical weights c_i = 1 used for the Lyapunov figure also work
+# for it (Sylvester check below, Supplementary remark on the weights).
+# The aggressive phenotype lies in the E_2 invasion regime, the
+# indolent one in the E_1 regime (alpha > 1).
 
 INDOLENT = Phenotype(
     name="indolent",
@@ -81,7 +79,7 @@ SEED = 42
 
 
 def hl_prime(p: Phenotype) -> tuple[bool, bool, float, float]:
-    """Check the Sylvester condition (HL) with c_i = 1.
+    """Sylvester check of the quadratic form at the canonical weights c_i = 1.
 
     Returns (cond1_ok, cond2_ok, alpha2_beta, Delta) where
     Delta = 4 β ω - γ² - α² β² ω - α β δ γ - β δ².
@@ -95,7 +93,7 @@ def hl_prime(p: Phenotype) -> tuple[bool, bool, float, float]:
 if __name__ == "__main__":
     print(f"{'phenotype':>11} | {'alpha':>5} {'beta':>5} {'gamma':>6} "
           f"{'omega':>6} {'delta':>6} | {'delta_c':>8} | "
-          f"{'alpha2 beta':>11} {'Delta':>8} | (HL)")
+          f"{'alpha2 beta':>11} {'Delta':>8} | c_i=1 ok")
     print("-" * 100)
     for p in PHENOTYPES:
         ok1, ok2, ab, D = hl_prime(p)

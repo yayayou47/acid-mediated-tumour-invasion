@@ -5,7 +5,7 @@ Vérification symbolique des calculs du manuscrit
 - Jacobiennes
 - Polynôme caractéristique de J3 et coefficients RH
 - Test de Routh-Hurwitz a1 a2 - a3 (signe et facteur)
-- Test de la condition (HL) via Sylvester sur la matrice -Q
+- Sylvester sur la matrice -Q aux poids canoniques (sec. 14 : poids optimaux)
 """
 import sympy as sp
 
@@ -109,7 +109,7 @@ RH_simp = sp.simplify(RH)
 print(RH_simp)
 
 print("\n"+"="*72)
-print("6. CONDITION (HL) : Sylvester sur -Q")
+print("6. POIDS CANONIQUES : Sylvester sur -Q")
 print("="*72)
 # Matrice Q (manuscrit)
 c1, c2, c3 = sp.symbols('c1 c2 c3', positive=True)
@@ -139,7 +139,7 @@ print(f"  m2 = {m2_1}")
 print(f"  m3 = {m3_1}")
 print(f"  m3 factorisé = {sp.factor(m3_1)}")
 
-# L'hypothese (HL) du manuscrit est exactement m3 > 0 avec c1 = c2 = c3 = 1,
+# Le critere aux poids canoniques (ancienne hypothese (HL)) est exactement m3 > 0 avec c1 = c2 = c3 = 1,
 # c'est-a-dire Delta > 0 pour
 # Delta = 4 beta omega - gamma^2 - alpha^2 beta^2 omega - alpha beta delta gamma
 #         - beta delta^2,
@@ -149,7 +149,7 @@ print(f"  m3 factorisé = {sp.factor(m3_1)}")
 # etiquetee « du manuscrit » ne circule sans y correspondre.
 Delta_man = 4*beta*omega - gamma**2 - alpha**2*beta**2*omega \
     - alpha*beta*delta*gamma - beta*delta**2
-print(f"\n(HL) : Delta = {sp.expand(Delta_man)}")
+print(f"\npoids canoniques : Delta = {sp.expand(Delta_man)}")
 print(f"  residu  4*m3 - Delta  (doit etre 0) : {sp.simplify(4*m3_1 - Delta_man)}")
 
 print("\n"+"="*72)
@@ -606,7 +606,7 @@ print("\nDONE.")
 #     the variables (N,-T,-H).  The open order interval B = (0,1)^2 x (0,g/w)
 #     is positively invariant, contains E3 and no other equilibrium, and the
 #     order argument gives global convergence on the three non-bistable
-#     regions -- with no hypothesis, in particular without (HL).
+#     regions -- with no hypothesis, in particular without the canonical-weight condition.
 # ──────────────────────────────────────────────────────────────────────
 print()
 print("=" * 72)
@@ -660,7 +660,7 @@ def _limit(prm, y0, tf=60000.0):
 
 _rng = np.random.default_rng(20260801)
 print("\n  Convergence globale, 120 jeux de parametres x 8 donnees initiales :")
-print(f"  {'region':>34}  {'(HL) echoue':>12}  {'ecart max':>11}")
+print(f"  {'region':>34}  {'c_i=1 echoue':>12}  {'ecart max':>11}")
 for _label, _pick in (
         ("(i)   alpha<1, delta<dc  -> E3", "i"),
         ("(ii)  alpha<1, delta>dc  -> E2", "ii"),
@@ -683,12 +683,12 @@ for _label, _pick in (
             _target = np.array([1.0, 0.0, 0.0])
         _Delta = (4 * _b * _w - _g ** 2 - _a ** 2 * _b ** 2 * _w
                   - _a * _b * _d * _g - _b * _d ** 2)
-        _nHL += (_Delta <= 0) or (_a ** 2 * _b >= 4.0)   # (HL) = conjonction
+        _nHL += (_Delta <= 0) or (_a ** 2 * _b >= 4.0)   # critere canonique = conjonction
         for _ in range(8):
             _y0 = [_rng.uniform(1e-3, 1), _rng.uniform(1e-3, 1), _rng.uniform(0, _g / _w)]
             _worst = max(_worst, np.abs(_limit((_a, _b, _g, _w, _d), _y0) - _target).max())
     print(f"  {_label:>34}  {_nHL:>7}/120  {_worst:>11.2e}")
-print("  -> la convergence ne depend pas de (HL), qui echoue sur une large part")
+print("  -> la convergence ne depend pas du critere canonique, qui echoue sur une large part")
 print("     des jeux de la branche (i) sans que rien ne change.")
 
 # ──────────────────────────────────────────────────────────────────────
@@ -728,6 +728,21 @@ print("  residu  D(c_opt) - beta*omega*(1 - rho/4 - (3/4) rho^(2/3)) =",
 print("  factorisation  4 - s^3 - 3 s^2 + (s-1)(s+2)^2 =",
       sp.expand(4 - sroot**3 - 3 * sroot**2 + (sroot - 1) * (sroot + 2)**2))
 print("  -> D(c_opt) > 0  <=>  s < 1  <=>  rho < 1  <=>  q = omega - alpha delta gamma > 0")
+
+m2opt = sp.simplify((Qc[:2, :2].det()).subs({c2: c2opt}).subs(rho, rho_def))
+print("  residu  m2(c_opt) - c2 beta (1 - rho^(2/3)/4) =",
+      sp.simplify(m2opt - (c2opt * beta * (1 - rho**sp.Rational(2, 3) / 4)).subs(rho, rho_def)))
+
+# Classical existence of diagonal weights: -Sigma B Sigma is a Z-matrix whose
+# leading principal minors are 1, beta, beta*omega*(1 - rho).
+Bint = sp.Matrix([[-1, 0, -delta], [-alpha * beta, -beta, 0], [0, gamma, -omega]])
+Sig = sp.diag(1, -1, -1)
+Mz = -(Sig * Bint * Sig)
+print("  -Sigma B Sigma =", Mz.tolist(),
+      " ; Q(c) + (C B + B^T C)/2 =",
+      sp.simplify(Qc + (sp.diag(1, c2, c3) * Bint + Bint.T * sp.diag(1, c2, c3)) / 2).tolist())
+print("  mineurs principaux :", [sp.factor(Mz[:k, :k].det()) for k in (1, 2, 3)],
+      " (dernier = beta*omega*(1 - rho))")
 
 grad = [sp.simplify(sp.diff(Dq, v).subs({c2: c2opt, c3: c3opt}).subs(rho, rho_def))
         for v in (c2, c3)]

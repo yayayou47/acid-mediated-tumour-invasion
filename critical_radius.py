@@ -74,6 +74,42 @@ CHECK_EVERY = 100        # steps between outcome tests (0.5 time units)
 
 RESULTS_FILE = "critical_radius_results.json"
 
+# Dimensional values, the single place they are typed.  Source: Table 1 of
+# Martin, Gaffney, Gatenby & Maini, J. Theor. Biol. 267 (2010) 454-460,
+# which compiles Gatenby & Gawlinski (1996) and Gatenby et al. (2006).
+LIT = {
+    "r1": 2e-6,          # normal-cell growth rate, 1/s
+    "r2": 3.2e-6,        # tumour-cell growth rate, 1/s
+    "K": 5e8,            # carrying capacities, cells/cm^3
+    "D2": 2e-10,         # tumour-cell diffusivity, cm^2/s
+    "D3": 5e-6,          # effective acid diffusivity, cm^2/s
+    "r3": 1.1e-17,       # H+ production, M cm^3/(s cell)
+    "d3_min": 1.1e-4,    # vascular clearance, slowest (Gatenby & Gawlinski 1996), 1/s
+    "d3_max": 2.4e-2,    # vascular clearance, fastest, 1/s
+    "d1_max": 10.0,      # acid-induced death, range 0-10, 1/(M s)
+}
+PH_NORMAL = 7.4                  # extracellular pH of normal tissue
+PH_DROPS = (0.5, 1.0)            # measured peritumoural drop, pH units
+
+
+def ph_clearance_times():
+    """Clearance times 1/d3 implied by a tumour-wide pH drop.
+
+    At carrying capacity the excess acid is H_sat = r3 K / d3; a drop of dpH
+    units from PH_NORMAL means H_sat = 10^-PH_NORMAL (10^dpH - 1) mol/l.
+    """
+    base = 10.0 ** -PH_NORMAL
+    supply = LIT["r3"] * LIT["K"]                    # M/s
+    return [base * (10.0 ** d - 1.0) / supply for d in PH_DROPS]
+
+
+def clearance_rows():
+    """(label, 1/d3 in s) of Table 2: the pH-implied pair, then the slowest
+    tabulated clearance; the fastest tabulated one lies inside the pair."""
+    lo, hi = ph_clearance_times()
+    return [(f"{lo:.0f} s", lo), (f"{hi:.0f} s", hi), ("15 min", 900.0),
+            ("2.5 h", 1.0 / LIT["d3_min"])]
+
 
 # ══════════════════════════════════════════════════════════════════════
 # 1. ONE RUN, AND ITS OUTCOME
@@ -283,6 +319,32 @@ def jobs_screening(steps):
     return out
 
 
+def jobs_screening_far(steps):
+    """The same sweep carried to omega = 64 and 128.
+
+    Tissue clearance times of minutes to hours put omega = d3/r1 between
+    about 50 and a few thousand, above the decade of ``screening``.  These two
+    points extend it with the same set-up, the mesh refined so that ell_H
+    keeps about twelve nodes (nine sufficed at omega = 32).  At omega = 128 the
+    acid relaxes on 1/omega < 0.008, comparable to DT, so the point is
+    repeated with half the time step.
+    """
+    out = []
+    for omega, h in ((64.0, 0.01), (128.0, 0.0075)):
+        gamma = omega / (OMEGA / GAMMA)
+        ell = omega ** -0.5
+        out.append(("screening", f"omega={omega:g}",
+                    dict(steps=steps, lo=0.10 * (ell / ELL_H),
+                         hi=1.20 * (ell / ELL_H), L=8.0 * ell, h=h,
+                         gamma=gamma, omega=omega)))
+    out.append(("screening", "omega=128, dt=0.0025",
+                dict(steps=steps, lo=0.10 * (128 ** -0.5 / ELL_H),
+                     hi=1.20 * (128 ** -0.5 / ELL_H), L=8.0 * 128 ** -0.5,
+                     h=0.0075, gamma=128.0 / (OMEGA / GAMMA), omega=128.0,
+                     dt=0.5 * DT)))
+    return out
+
+
 def jobs_offcentre(steps):
     """A seed away from the centre breaks every reflection of the square.
 
@@ -434,7 +496,9 @@ EXPERIMENTS = {"domains": jobs_domains, "diffusivity": jobs_diffusivity,
                "centre": jobs_centre, "dwell": jobs_dwell,
                "monotone": jobs_monotone, "timestep": jobs_timestep,
                "pairs": jobs_pairs,
-               "screening": jobs_screening, "offcentre": jobs_offcentre,
+               "screening": jobs_screening,
+               "screening_far": jobs_screening_far,
+               "offcentre": jobs_offcentre,
                "shape": jobs_shape, "amplitude": jobs_amplitude,
                "lsweep": jobs_lsweep}
 
@@ -584,7 +648,7 @@ def discrete_masses(L=2.0, h=H_TARGET, radius=0.5816):
         print(f"  {shape:>9} : {m:.4f}  ({100 * (m / nominal - 1):+.1f} %)")
 
 
-def dimensional_table(mult=None, D3_cm2_s=5e-6):
+def dimensional_table(mult=None, D3_cm2_s=LIT["D3"]):
     """Screening length and critical radius in millimetres.
 
     The unit of length of the nondimensional system is sqrt(D3/r1), so
@@ -600,10 +664,185 @@ def dimensional_table(mult=None, D3_cm2_s=5e-6):
     print(f"\ndimensional scales, D3 = {D3_cm2_s:.0e} cm^2/s, "
           f"R_c = {mult:.2f} ell_H")
     print(f"  {'1/d3':>10} {'ell_H (mm)':>12} {'R_c (mm)':>10}")
-    for label, tau in (("3 min", 180.0), ("15 min", 900.0),
-                       ("1 h", 3600.0), ("2.5 h", 9000.0)):
+    for label, tau in clearance_rows():
         ell_mm = 10.0 * np.sqrt(D3_cm2_s * tau)
-        print(f"  {label:>10} {ell_mm:12.2f} {mult * ell_mm:10.2f}")
+        print(f"  {label:>10} {ell_mm:12.2f} {mult * ell_mm:10.2f}"
+              f"   omega = {1.0 / (tau * LIT['r1']):.0f}")
+
+
+VALUES_TEX = "values_threshold.tex"
+
+
+def _sig2(x):
+    """Two significant digits, trailing zero kept (0.30, 1.3, 4.9)."""
+    from math import floor, log10
+    d = max(0, 1 - int(floor(log10(abs(x)))))
+    return f"{x:.{d}f}"
+
+
+def _sci(x):
+    """Two significant digits, as $5.5\\cdot 10^{3}$ above 1000."""
+    from math import floor, log10
+    if 0.01 <= x < 1000:
+        return f"{float(_sig2(x)):g}" if x >= 10 else _sig2(x)
+    e = int(floor(log10(x)))
+    m = f"{x / 10 ** e:.1f}".removesuffix(".0")
+    return f"{m}\\cdot 10^{{{e}}}"
+
+
+def _series(values, fmt="{:.3f}"):
+    """'$a$, $b$ and $c$', as the prose quotes a series."""
+    items = [f"${fmt.format(v)}$" for v in values]
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def write_values(results, path=VALUES_TEX):
+    """Write every number that Section 4.5 and the Supplementary quote.
+
+    Nothing of the size threshold is typed by hand in the manuscript: the
+    text reads these macros, and they are rebuilt from the stored
+    measurements by ``--report-only`` without rerunning any bisection.
+    """
+    from math import ceil
+    fam = {}
+    for r in results:
+        if "R_c" in r:
+            fam.setdefault(r["family"], {})[r["label"]] = r
+
+    def rc(family, label):
+        return fam[family][label]["R_c"]
+
+    dom = sorted(fam["domains"].values(), key=lambda r: r["L"])
+    base = fam["domains"]["L=2.0"]
+    top = max((r for r in dom if r["L"] >= 4.0), key=lambda r: r["R_c"])
+    plateau, plateau_hw = top["R_c"], top["half_width"]
+    qs = bessel_prediction()
+    refined = [rc("mesh", "L=2, h=0.0125"), rc("timestep", "dt=0.0025")]
+    refine_pct = max(abs(v / base["R_c"] - 1) for v in refined) * 100
+    diff = [rc("diffusivity", f"delta1=delta2={e}") for e in
+            ("5e-02", "5e-03", "5e-04")]
+    diff_pct = max(abs(v / base["R_c"] - 1) for v in diff) * 100
+    omegas = (32, 16, 8, 4)
+    om = [rc("screening", f"omega={w}") for w in omegas]
+    ratio = [v * np.sqrt(w) for v, w in zip(om, omegas)]
+    Ls = np.array([r["L"] for r in dom])
+    Rs = np.array([r["R_c"] for r in dom])
+    slopes = np.diff(Rs) / np.diff(Ls)
+    from scipy.optimize import curve_fit
+    (rinf, _, _), _ = curve_fit(
+        lambda x, a, b, c: a - b * np.exp(-x / c), Ls, Rs,
+        p0=[Rs[-1] * 1.2, 1.0, 1.0], maxfev=40000)
+
+    macros = {
+        "thrRcTwo": f"{base['R_c']:.3f}",
+        "thrRcTwoHW": f"{base['half_width']:.3f}",
+        "thrRcMeshFine": f"{refined[0]:.3f}",
+        "thrRefinePct": f"{refine_pct:.1f}",
+        "thrRcDiff": _series(diff),
+        "thrDiffPct": f"{ceil(diff_pct)}",
+        "thrQsMult": f"{qs / ELL_H:.2f}",
+        "thrQsRc": f"{qs:.3f}",
+        "thrRcDomains": _series(Rs),
+        "thrRcInf": f"{plateau:.3f}",
+        "thrRcInfHW": f"{plateau_hw:.3f}",
+        "thrPlateauMult": f"{plateau / ELL_H:.2f}",
+        "thrPlateauExcessPct": f"{100 * (plateau / qs - 1):.0f}",
+        "thrRcOmega": _series(om),
+        "thrRatioOmega": _series(ratio, "{:.2f}"),
+        "thrOmegaRadiusFactor": f"{max(om) / min(om):.1f}",
+        "thrOmegaRatioPct": f"{100 * (max(ratio) - min(ratio)) / max(ratio):.0f}",
+        "thrRcOmegaFine": f"{rc('screening', 'omega=32, h=0.01'):.3f}",
+        "thrRcOmegaCoarse": f"{rc('screening', 'omega=32'):.3f}",
+        "thrRcAmpHigh": f"{rc('amplitude', 'amp=0.75'):.3f}",
+        "thrRcAmpLow": f"{rc('amplitude', 'amp=0.5'):.3f}",
+        "thrDensityBound": f"{OMEGA / (GAMMA * DELTA):.2f}",
+        "thrSlopeFirst": f"{slopes[0]:.2f}",
+        "thrSlopeThreeFour": f"{slopes[list(Ls).index(3.0)]:.2f}",
+        "thrFitRinf": f"{rinf:.3f}",
+        "thrFitGapPct": f"{100 * (rinf - Rs[-1]) / rinf:.0f}",
+        "thrRcSquare": f"{rc('shape', 'square'):.3f}",
+        "thrRcGaussian": f"{rc('shape', 'gaussian'):.3f}",
+    }
+    # Table 2 and the dimensional reading of Section 4.5 and the Discussion.
+    rows, diam = [], []
+    for label, tau in clearance_rows():
+        ell_mm = 10.0 * np.sqrt(LIT["D3"] * tau)
+        num, unit = label.split()
+        om_row = 1.0 / (tau * LIT["r1"])
+        rows.append(f"${num}$ {unit} & ${_sci(om_row)}$ & "
+                    f"${_sig2(ell_mm)}$ mm & "
+                    f"${_sig2(plateau / ELL_H * ell_mm)}$ mm \\\\")
+        diam.append(2.0 * plateau / ELL_H * ell_mm)
+    tau_ph = ph_clearance_times()
+    supply = LIT["r3"] * LIT["K"]
+    far = [w for w in (64, 128) if ("screening", f"omega={w}") in
+           {(r["family"], r["label"]) for r in results if "R_c" in r}]
+    om_all = sorted(set(omegas) | set(far))
+    ratio_all = [rc("screening", f"omega={w}") * np.sqrt(w) for w in om_all]
+    macros.update({
+        "dimTauPhLo": f"{tau_ph[0]:.0f}",
+        "dimTauPhHi": f"{tau_ph[1]:.0f}",
+        "dimTauFast": f"{1.0 / LIT['d3_max']:.0f}",
+        "dimOmegaMin": _sci(LIT["d3_min"] / LIT["r1"]),
+        "dimOmegaMax": _sci(LIT["d3_max"] / LIT["r1"]),
+        "dimOmegaPh": f"${_sci(1.0 / (tau_ph[1] * LIT['r1']))}$ to "
+                      f"${_sci(1.0 / (tau_ph[0] * LIT['r1']))}$",
+        "dimBeta": f"{LIT['r2'] / LIT['r1']:.1f}",
+        "dimDeltaTwo": _sci(LIT["D2"] / LIT["D3"]),
+        "dimRatioSlow": f"{LIT['d1_max'] * supply / (LIT['r1'] * LIT['d3_min']):.0f}",
+        "dimRatioFast": f"{LIT['d1_max'] * supply / (LIT['r1'] * LIT['d3_max']):.1f}",
+        "dimDiamPh": f"${_sig2(diam[0])}$ to ${_sig2(diam[1])}$",
+        "dimDiamSlow": f"{diam[-1]:.0f}",
+        "thrOmegaMaxMeasured": f"{max(om_all):d}",
+        "thrRatioOmegaAll": _series(ratio_all, "{:.2f}"),
+        "thrOmegaListAll": _series(om_all, "{:d}"),
+        "thrOmegaRatioAllPct": f"{100 * (max(ratio_all) - min(ratio_all)) / max(ratio_all):.0f}",
+    })
+    # Drift of R_c/ell_H per doubling of omega, least squares in log2(omega),
+    # and what it would add if continued linearly to the fastest row of
+    # Table 2.  An extrapolation, declared as such in the text.
+    slope, icpt = np.polyfit(np.log2(om_all), ratio_all, 1)
+    om_fast = 1.0 / (clearance_rows()[0][1] * LIT["r1"])
+    extra = slope * np.log2(om_fast / max(om_all))
+    macros.update({
+        "thrRatioSlopePct": f"{100 * slope / np.mean(ratio_all):.1f}",
+        "thrRatioDoublings": f"{np.log2(om_fast / max(om_all)):.0f}",
+        "thrRatioExtrapPct": f"{100 * extra / ratio_all[-1]:.0f}",
+        "thrRatioMax": f"{ratio_all[-1]:.2f}",
+        "thrRatioMin": f"{ratio_all[0]:.2f}",
+    })
+    if far:
+        dt_ctrl = rc("screening", "omega=128, dt=0.0025")
+        macros["thrRcOmegaDtCtrl"] = f"{dt_ctrl:.4f}"
+        macros["thrRcOmegaTwoEight"] = f"{rc('screening', 'omega=128'):.4f}"
+        macros["thrDtCtrlPct"] = (
+            f"{100 * abs(dt_ctrl / rc('screening', 'omega=128') - 1):.1f}")
+    lines = ["% Generated by critical_radius.py --report-only "
+             "(from critical_radius_results.json); do not edit."]
+    lines += [f"\\newcommand{{\\{k}}}{{{v}}}" for k, v in macros.items()]
+    lines.append("\\newcommand{\\thrTableRows}{%\n" + "\n".join(rows) + "}")
+    lit = [
+        (r"$\tilde r_{1}$", "normal-cell growth rate", _sci(LIT["r1"]), r"s$^{-1}$"),
+        (r"$\tilde r_{2}$", "tumour-cell growth rate", _sci(LIT["r2"]), r"s$^{-1}$"),
+        (r"$\tilde K_{N}, \tilde K_{T}$", "carrying capacities", _sci(LIT["K"]),
+         r"cells cm$^{-3}$"),
+        (r"$\tilde D_{2}$", "tumour-cell diffusivity", _sci(LIT["D2"]),
+         r"cm$^{2}$ s$^{-1}$"),
+        (r"$\tilde D_{3}$", "effective acid diffusivity", _sci(LIT["D3"]),
+         r"cm$^{2}$ s$^{-1}$"),
+        (r"$\tilde r_{3}$", "H$^{+}$ production rate", _sci(LIT["r3"]),
+         r"M cm$^{3}$ s$^{-1}$ cell$^{-1}$"),
+        (r"$\tilde d_{3}$", "acid clearance rate",
+         f"{_sci(LIT['d3_min'])}\\text{{ -- }}{_sci(LIT['d3_max'])}", r"s$^{-1}$"),
+        (r"$\tilde d_{1}$", "acid-induced death rate",
+         f"0\\text{{ -- }}{LIT['d1_max']:g}", r"M$^{-1}$ s$^{-1}$"),
+    ]
+    lines.append("\\newcommand{\\dimLitRows}{%\n" + "\n".join(
+        f"{sym} & {name} & ${val}$ & {unit} \\\\" for sym, name, val, unit in lit)
+        + "}")
+    with open(path, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    print(f"wrote {path}")
 
 
 def report(results):
@@ -680,6 +919,11 @@ def report(results):
         if family == "domains":
             plateau_fit(rows)
         print()
+
+    if all(f in by_family for f in ("domains", "mesh", "timestep",
+                                    "diffusivity", "screening",
+                                    "amplitude", "shape")):
+        write_values(results)
 
 
 def main():
