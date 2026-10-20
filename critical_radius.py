@@ -103,6 +103,19 @@ def ph_clearance_times():
     return [base * (10.0 ** d - 1.0) / supply for d in PH_DROPS]
 
 
+def ph_at_saturation(tau):
+    """Extracellular pH at carrying capacity for a clearance time tau = 1/d3.
+
+    Inverse of ph_clearance_times: the excess acid r3 K tau is added to the
+    normal-tissue concentration 10^-PH_NORMAL.  The pH fixes r3 K / d3, not d3
+    alone, so a slower clearance is compatible with the same pH only with a
+    proportionally smaller production rate.
+    """
+    from math import log10
+    base = 10.0 ** -PH_NORMAL
+    return PH_NORMAL - log10(1.0 + LIT["r3"] * LIT["K"] * tau / base)
+
+
 def clearance_rows():
     """(label, 1/d3 in s) of Table 2: the pH-implied pair, then the slowest
     tabulated clearance; the fastest tabulated one lies inside the pair."""
@@ -663,11 +676,11 @@ def dimensional_table(mult=None, D3_cm2_s=LIT["D3"]):
         mult = bessel_prediction() / ELL_H
     print(f"\ndimensional scales, D3 = {D3_cm2_s:.0e} cm^2/s, "
           f"R_c = {mult:.2f} ell_H")
-    print(f"  {'1/d3':>10} {'ell_H (mm)':>12} {'R_c (mm)':>10}")
+    print(f"  {'1/d3':>10} {'pH':>5} {'ell_H (mm)':>12} {'R_c (mm)':>10}")
     for label, tau in clearance_rows():
         ell_mm = 10.0 * np.sqrt(D3_cm2_s * tau)
-        print(f"  {label:>10} {ell_mm:12.2f} {mult * ell_mm:10.2f}"
-              f"   omega = {1.0 / (tau * LIT['r1']):.0f}")
+        print(f"  {label:>10} {ph_at_saturation(tau):5.1f} {ell_mm:12.2f} "
+              f"{mult * ell_mm:10.2f}   omega = {1.0 / (tau * LIT['r1']):.0f}")
 
 
 VALUES_TEX = "values_threshold.tex"
@@ -769,7 +782,8 @@ def write_values(results, path=VALUES_TEX):
         ell_mm = 10.0 * np.sqrt(LIT["D3"] * tau)
         num, unit = label.split()
         om_row = 1.0 / (tau * LIT["r1"])
-        rows.append(f"${num}$ {unit} & ${_sci(om_row)}$ & "
+        rows.append(f"${num}$ {unit} & ${ph_at_saturation(tau):.1f}$ & "
+                    f"${_sci(om_row)}$ & "
                     f"${_sig2(ell_mm)}$ mm & "
                     f"${_sig2(plateau / ELL_H * ell_mm)}$ mm \\\\")
         diam.append(2.0 * plateau / ELL_H * ell_mm)
@@ -793,6 +807,11 @@ def write_values(results, path=VALUES_TEX):
         "dimRatioFast": f"{LIT['d1_max'] * supply / (LIT['r1'] * LIT['d3_max']):.1f}",
         "dimDiamPh": f"${_sig2(diam[0])}$ to ${_sig2(diam[1])}$",
         "dimDiamSlow": f"{diam[-1]:.0f}",
+        "dimPhLo": f"{ph_at_saturation(tau_ph[1]):.1f}",
+        "dimPhHi": f"{ph_at_saturation(tau_ph[0]):.1f}",
+        "dimPhMid": f"{ph_at_saturation(clearance_rows()[2][1]):.1f}",
+        "dimPhSlow": f"{ph_at_saturation(clearance_rows()[3][1]):.1f}",
+        "dimRcPh": f"${_sig2(diam[0] / 2)}$ to ${_sig2(diam[1] / 2)}$",
         "thrOmegaMaxMeasured": f"{max(om_all):d}",
         "thrRatioOmegaAll": _series(ratio_all, "{:.2f}"),
         "thrOmegaListAll": _series(om_all, "{:d}"),
