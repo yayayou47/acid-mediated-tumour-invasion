@@ -13,8 +13,8 @@ abstract: >-
   Fisher-KPP front-speed measurement.
 type: software
 license: MIT
-version: R2
-date-released: 2026-10-16
+version: R2.1
+date-released: 2026-10-20
 authors:
   - family-names: Yaya
     given-names: Yaya Youssouf
